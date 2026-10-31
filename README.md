@@ -9,7 +9,7 @@ Redmond, Bothell, Woodinville, Kenmore). It runs on your own computer.
   leaving home at 8:15 and work at 5:00, with and without the I-405 express toll lanes.
 - **True monthly cost**: rent + parking + utilities + fees + gas and tolls, plus the
   total due at move-in.
-- **Must-haves** checked on every listing: 1 bedroom, rent under $3,000, in-unit laundry,
+- **Must-haves** checked on every listing: 1 bedroom, rent under $3,500, in-unit laundry,
   gym in building, covered parking.
 - **Construction-quality score (0-100)** with a confidence level and plain-language
   flags, built from King County Assessor records, building-era patterns and your own
@@ -86,8 +86,8 @@ This is a screening estimate, not an inspection.
 ## Settings
 
 Defaults are in `aptfinder/config.py`: work address, departure times, workdays per month,
-fuel cost per mile, the Claude model and must-haves. The work address, fuel cost, model and
-database location can also be set in `.env`.
+fuel cost per mile, the Claude model and must-haves. The work address, rent limit
+(`APTFINDER_MAX_RENT`), fuel cost, model and database location can also be set in `.env`.
 
 ## Tests
 

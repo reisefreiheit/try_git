@@ -93,7 +93,7 @@ def test_must_haves_and_costs():
                "covered_parking": False, "parking_cost": 150, "utilities_estimate": None,
                "monthly_fees": 75, "deposit": 1000, "move_in_fees": 350}
     checks = {c["label"]: c["status"] for c in must_have_checks(listing, Settings().must_haves)}
-    assert checks == {"1+ bedroom": "pass", "Rent under $3,000": "pass", "In-unit laundry": "pass",
+    assert checks == {"1+ bedroom": "pass", "Rent under $3,500": "pass", "In-unit laundry": "pass",
                       "Gym in building": "unknown", "Covered parking": "fail"}
     c = costs(listing, {"monthly_cost": 120})
     assert c["monthly_total"] == 2850 + 150 + 75 + 120
@@ -255,7 +255,7 @@ def test_api_flow(tmp_path, settings, db):
 
 def test_api_manual_entry_without_keys(settings, db):
     client = TestClient(create_app(settings, db))
-    r = client.post("/api/listings", json={"text": "x", "fields": {"address": "1 Main St", "rent": 3100}})
+    r = client.post("/api/listings", json={"text": "x", "fields": {"address": "1 Main St", "rent": 3600}})
     body = r.json()
     assert r.status_code == 201
     assert any("extraction skipped" in w for w in body["warnings"])

@@ -30,7 +30,7 @@ _load_dotenv(ROOT / ".env")
 @dataclass(frozen=True)
 class MustHaves:
     bedrooms: int = 1
-    max_rent: int = 3000
+    max_rent: int = field(default_factory=lambda: int(os.environ.get("APTFINDER_MAX_RENT", "3500")))
     in_unit_laundry: bool = True
     gym: bool = True
     covered_parking: bool = True
