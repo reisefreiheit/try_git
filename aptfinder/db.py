@@ -20,7 +20,7 @@ LISTING_FIELDS = [
     "available_date", "notes",
 ]
 BOOL_FIELDS = {"in_unit_laundry", "gym", "covered_parking"}
-JSON_FIELDS = {"commute_json", "building_json", "checklist_json", "extracted_json"}
+JSON_FIELDS = {"commute_json", "building_json", "checklist_json", "extracted_json", "photos_json"}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS listings (
@@ -54,7 +54,8 @@ CREATE TABLE IF NOT EXISTS listings (
     extracted_json TEXT,
     commute_json TEXT,
     building_json TEXT,
-    checklist_json TEXT
+    checklist_json TEXT,
+    photos_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS assessor_records (
@@ -98,7 +99,15 @@ class Database:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Add columns introduced after a database was first created."""
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(listings)")}
+        for col in ("photos_json",):
+            if col not in cols:
+                self._conn.execute(f"ALTER TABLE listings ADD COLUMN {col} TEXT")
 
     @contextmanager
     def tx(self) -> Iterator[sqlite3.Connection]:

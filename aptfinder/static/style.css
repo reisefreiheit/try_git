@@ -141,3 +141,14 @@ pre.src { white-space: pre-wrap; font-size: .82rem; background: var(--bg); paddi
   .item { grid-template-columns: 1fr; }
   .score { justify-self: start; }
 }
+
+.filebtn {
+  display: inline-block; margin: 0; cursor: pointer; border-radius: 8px; padding: 8px 14px;
+  border: 1px solid var(--line); color: var(--text); font-size: inherit;
+}
+.filebtn:focus-within { outline: 2px solid var(--accent); }
+.thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; margin-top: 12px; }
+.thumb { position: relative; margin: 0; }
+.thumb img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); display: block; }
+.thumb figcaption { position: absolute; left: 6px; top: 6px; background: rgb(0 0 0 / .6); color: #fff; font-size: .75rem; padding: 0 6px; border-radius: 6px; }
+.thumb button { position: absolute; right: 4px; top: 4px; background: rgb(0 0 0 / .6); color: #fff; border: none; padding: 2px 7px; }

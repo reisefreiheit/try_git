@@ -163,7 +163,7 @@ function renderDetail() {
   $("#d-title").textContent = l.title || l.address || "Listing";
   document.querySelectorAll("#d-tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === currentTab));
   const body = $("#d-body");
-  body.innerHTML = { details: detailsTab, costs: costsTab, construction: constructionTab, tour: tourTab }[currentTab](l);
+  body.innerHTML = { details: detailsTab, costs: costsTab, construction: constructionTab, photos: photosTab, tour: tourTab }[currentTab](l);
   bindTab(body, l);
 }
 
@@ -221,7 +221,7 @@ function constructionTab(l) {
   return `
     <div class="row" style="margin-top:0; align-items:flex-start">
       <div class="score ${scoreClass(cs.score)}"><b>${cs.score ?? "—"}</b><span>${cs.confidence ? esc(cs.confidence) + " confidence" : "no data"}</span></div>
-      <p class="note" style="flex:1; margin:0">A screening estimate from county records, building-era patterns and your tour ratings, not an inspection.
+      <p class="note" style="flex:1; margin:0">A screening estimate from county records, building-era patterns, your tour ratings and listing photos, not an inspection.
         ${cs.missing.length ? `<br>To improve confidence, add: ${cs.missing.map(esc).join("; ")}.` : ""}</p>
     </div>
     ${comps ? `<h3>How it was scored</h3><table><tr><th>Factor</th><th class="num">Score</th><th class="num">Weight</th></tr>${comps}</table>` : ""}
@@ -237,6 +237,58 @@ function constructionTab(l) {
       <div><label for="b-cond">Condition</label><select id="b-cond">${opt(["Poor", "Fair", "Average", "Good", "Excellent"], b.condition)}</select></div>
     </div>
     <div class="row end"><span class="msg" id="d-msg"></span><button id="b-save">Save building details</button></div>`;
+}
+
+function photosTab(l) {
+  const st = l.photos || { files: [], analysis: null, analyzed_files: [] };
+  const a = st.analysis;
+  const stale = a && JSON.stringify(st.files) !== JSON.stringify(st.analyzed_files || []);
+  const breakdown = l.construction.photo_breakdown || (a ? Object.entries(a.categories).map(([key, c]) => ({ key, label: key, ...c })) : []);
+  const stars = (r) => (r == null ? "—" : `${r}/5`);
+  const thumbs = st.files.map((f, i) => `<figure class="thumb">
+      <img src="/api/listings/${l.id}/photos/${encodeURIComponent(f)}" alt="Photo ${i + 1}" loading="lazy">
+      <figcaption>${i + 1}</figcaption>
+      <button class="ghost small" data-del="${esc(f)}" aria-label="Remove photo ${i + 1}">✕</button></figure>`).join("");
+  return `
+    <p class="note" style="margin-top:0">Save the listing photos (right-click → Save image, or screenshot them) and add them here.
+      Photos are shrunk before upload. Up to 20 per listing; about 10-15 cents to analyze 10 photos.</p>
+    <div class="row" style="margin-top:0">
+      <label class="filebtn ghost">Add photos<input type="file" id="p-files" accept="image/*" multiple hidden></label>
+      <button id="p-analyze" ${st.files.length && CONFIG.has_anthropic_key ? "" : "disabled"}>${a ? "Re-analyze photos" : "Analyze photos"}</button>
+      <span class="msg" id="d-msg"></span>
+    </div>
+    ${!CONFIG.has_anthropic_key ? `<p class="note">Add ANTHROPIC_API_KEY to .env to analyze photos.</p>` : ""}
+    ${st.files.length ? `<div class="thumbs">${thumbs}</div>` : `<p class="note">No photos yet.</p>`}
+    ${a ? `
+      ${stale ? `<p class="msg err">Photos changed since the last analysis. Re-analyze to update the score.</p>` : ""}
+      <h3>What the photos show</h3>
+      ${a.summary ? `<p style="margin-top:0">${esc(a.summary)}</p>` : ""}
+      <table><tr><th>Item</th><th class="num">Rating</th><th>Evidence</th></tr>
+        ${breakdown.map((c) => `<tr><td>${esc(c.label)}${c.overridden_by_tour ? '<div class="note">Your tour rating is used instead</div>' : ""}</td>
+          <td class="num">${c.visible ? stars(c.rating) : '<span class="note">not shown</span>'}</td>
+          <td>${esc(c.evidence || "")}${c.photos?.length ? ` <span class="note">(photo ${c.photos.join(", ")})</span>` : ""}</td></tr>`).join("")}
+      </table>
+      ${a.check_on_tour.length ? `<h3>Check on the tour</h3><ul class="flags">${a.check_on_tour.map((t) => `<li class="warn">${t.photo ? `Photo ${t.photo}: ` : ""}${esc(t.text)}</li>`).join("")}</ul>` : ""}
+      ${a.photo_caveats.length ? `<h3>Limits of these photos</h3><ul class="flags">${a.photo_caveats.map((t) => `<li class="info">${esc(t)}</li>`).join("")}</ul>` : ""}
+      <p class="note">Photos count for about 10% of the construction score. Items you rate on the tour replace the photo rating for the same item.</p>` : ""}`;
+}
+
+function shrinkImage(file, maxEdge = 1024) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxEdge / Math.max(img.naturalWidth, img.naturalHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.naturalWidth * scale);
+      canvas.height = Math.round(img.naturalHeight * scale);
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL("image/jpeg", 0.85));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error(`${file.name} could not be read (HEIC photos: export as JPEG first)`)); };
+    img.src = url;
+  });
 }
 
 function tourTab(l) {
@@ -300,6 +352,34 @@ function bindTab(body, l) {
       year_built: num("#b-year"), eff_year: num("#b-eff"), stories: num("#b-stories"),
       constr_class: str("#b-constr"), bldg_quality: str("#b-quality"), condition: str("#b-cond"),
     } }));
+  });
+
+  const files = $("#p-files", body);
+  if (files) files.addEventListener("change", async () => {
+    const picked = [...files.files];
+    if (!picked.length) return;
+    setMsg(`Preparing ${picked.length} photo${picked.length > 1 ? "s" : ""}…`);
+    const images = [];
+    const problems = [];
+    for (const f of picked) {
+      try { images.push(await shrinkImage(f)); } catch (e) { problems.push(e.message); }
+    }
+    try {
+      if (images.length) {
+        const res = await api(`/api/listings/${l.id}/photos`, { method: "POST", body: { images } });
+        problems.push(...res.warnings);
+        replaceCurrent(res);
+      }
+      setMsg(problems.length ? problems.join(" ") : "Photos added.", problems.length > 0);
+    } catch (e) { setMsg(e.message, true); }
+  });
+  body.querySelectorAll("[data-del]").forEach((btn) => btn.addEventListener("click", () => run(btn, async () => {
+    replaceCurrent(await api(`/api/listings/${l.id}/photos/${encodeURIComponent(btn.dataset.del)}`, { method: "DELETE" }));
+  })));
+  on("#p-analyze", async () => {
+    setMsg("Analyzing photos… this can take up to a minute.");
+    replaceCurrent(await api(`/api/listings/${l.id}/photos/analyze`, { method: "POST" }));
+    setMsg("Analysis updated.");
   });
 
   body.querySelectorAll(".seg").forEach((seg) => seg.addEventListener("click", (e) => {

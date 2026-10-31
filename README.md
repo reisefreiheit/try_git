@@ -12,8 +12,8 @@ Redmond, Bothell, Woodinville, Kenmore). It runs on your own computer.
 - **Must-haves** checked on every listing: 1 bedroom, rent under $3,500, in-unit laundry,
   gym in building, covered parking.
 - **Construction-quality score (0-100)** with a confidence level and plain-language
-  flags, built from King County Assessor records, building-era patterns and your own
-  tour checklist.
+  flags, built from King County Assessor records, building-era patterns, your own
+  tour checklist and Claude's review of the listing photos.
 - **Tracking**: interested → contacted → tour scheduled → toured → applied → rejected / signed.
 
 ## Setup
@@ -65,11 +65,12 @@ decoded value looks wrong compared with the county's property page, adjust those
 
 | Factor | Weight | Source |
 |---|---|---|
-| Building quality grade | 30 | County record |
-| Condition rating | 15 | County record |
-| Construction type (steel/concrete/wood/masonry) | 10 | County record |
-| Age, using the renovation year if there is one | 15 | County record or listing |
+| Building quality grade | 27 | County record |
+| Condition rating | 13 | County record |
+| Construction type (steel/concrete/wood/masonry) | 9 | County record |
+| Age, using the renovation year if there is one | 11 | County record or listing |
 | Tour checklist (9 items rated 1-5) | 30 | You, during the tour |
+| Listing photos | 10 | Claude, from photos you add |
 
 Missing factors are left out and the remaining weights are scaled up. Confidence is
 **high** with county grades plus at least 5 tour ratings, **medium** with one of those,
@@ -82,6 +83,24 @@ and buildings under 12 years old, which are exempt from Washington's rent-increa
 (HB 1217).
 
 This is a screening estimate, not an inspection.
+
+### Listing photos
+
+On a listing's **Photos** tab, add up to 20 photos (save them from the listing site or
+take screenshots). The browser shrinks them to 1024 px JPEGs before upload; they are
+stored in `data/photos/`. **Analyze photos** asks Claude to rate, from what is clearly
+visible only, on a 1-5 scale:
+
+windows · flooring · kitchen · bathroom · heating and cooling (mini-split/heat pump vs.
+baseboard) · water and moisture signs · exterior and balconies · renovation consistency
+("lipstick" updates next to original windows or fixtures)
+
+Anything not shown is marked "not shown" rather than guessed. The analysis also lists
+specific things to check on the tour (with the photo number) and caveats such as staged
+or model-unit photos. Photo ratings carry about 10% of the score, and any item you rate on
+the tour checklist (windows, floors, finishes, heating/cooling, moisture) replaces the photo
+rating for that item. Expect roughly 10-15 cents per analysis of 10 photos. iPhone HEIC
+photos need to be exported as JPEG first in browsers other than Safari.
 
 ## Settings
 
@@ -97,7 +116,7 @@ pytest
 
 ## Roadmap
 
-- Construction score v2: listing-photo analysis, pasted resident reviews, city permit
-  history, liquefaction zones.
+- Construction score v2 (rest): pasted resident reviews, city permit history,
+  liquefaction zones.
 - Map with drive-time zones from IonQ; weighted overall score; side-by-side comparison.
 - Import saved-search alert emails.

@@ -261,3 +261,139 @@ def test_api_manual_entry_without_keys(settings, db):
     assert any("extraction skipped" in w for w in body["warnings"])
     rent_check = next(m for m in body["must_haves"] if m["label"].startswith("Rent"))
     assert rent_check["status"] == "fail"
+
+
+# ---- photos ---------------------------------------------------------------
+
+import base64 as _b64
+import sqlite3 as _sqlite3
+
+from aptfinder import photos
+
+JPEG = b"\xff\xd8\xff\xe0" + b"0" * 100
+PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 100
+
+
+def _b(data: bytes) -> str:
+    return "data:image/jpeg;base64," + _b64.b64encode(data).decode()
+
+
+def _analysis_payload(**overrides):
+    cats = {k: {"visible": False, "rating": None, "evidence": "", "photos": []} for k in photos.CATEGORY_KEYS}
+    cats["windows"] = {"visible": True, "rating": 2, "evidence": "Aluminum sliders (photo 1)", "photos": [1]}
+    cats["kitchen"] = {"visible": True, "rating": 4, "evidence": "Quartz counters", "photos": [2, 9]}
+    cats["moisture"] = {"visible": True, "rating": 7, "evidence": "Clean ceilings", "photos": [1]}
+    payload = {"categories": cats,
+               "check_on_tour": [{"photo": 1, "text": "Check window frames for condensation"},
+                                 {"photo": 42, "text": "Look at the balcony deck"}],
+               "photo_caveats": ["Photo 2 looks like a model unit"], "summary": "Mixed."}
+    payload.update(overrides)
+    return payload
+
+
+def test_save_photos_validates(settings):
+    names, errors = photos.save_photos(settings, 1, [], [_b(JPEG), _b(PNG), _b(b"not an image"), "%%%"])
+    assert names == ["1.jpg", "2.png"]
+    assert len(errors) == 2
+    names, _ = photos.save_photos(settings, 1, names, [_b(JPEG)])
+    assert names[-1] == "3.jpg"
+    assert (photos.photo_dir(settings, 1) / "3.jpg").read_bytes() == JPEG
+
+
+def test_save_photos_limit(settings):
+    existing = [f"{i}.jpg" for i in range(1, photos.MAX_PHOTOS + 1)]
+    names, errors = photos.save_photos(settings, 2, existing, [_b(JPEG)])
+    assert len(names) == photos.MAX_PHOTOS and errors
+
+
+def test_clean_analysis_clamps_and_filters():
+    a = photos.clean_analysis(_analysis_payload(), n_photos=3)
+    assert a["categories"]["moisture"]["rating"] == 5        # clamped from 7
+    assert a["categories"]["kitchen"]["photos"] == [2]        # photo 9 doesn't exist
+    assert a["categories"]["flooring"] == {"visible": False, "rating": None, "evidence": "", "photos": []}
+    assert a["check_on_tour"][1]["photo"] is None            # photo 42 doesn't exist
+
+
+def test_photo_component_tour_override():
+    a = photos.clean_analysis(_analysis_payload(), n_photos=3)
+    score, detail, breakdown = photos.photo_component(a, {})
+    assert round(score) == round(((2 + 4 + 5) / 3 - 1) / 4 * 100)
+    # Tour rated windows and finishes: only moisture (5/5) is left from photos.
+    score, _, breakdown = photos.photo_component(a, {"windows": 5, "finishes": 3})
+    assert score == 100
+    assert next(c for c in breakdown if c["key"] == "windows")["overridden_by_tour"]
+    # Everything overridden -> no photo component.
+    assert photos.photo_component(a, {"windows": 3, "finishes": 3, "moisture": 3}) is None
+
+
+def test_construction_score_includes_photos():
+    a = photos.clean_analysis(_analysis_payload(), n_photos=3)
+    building = {"year_built": 2016, "constr_class": "Wood frame", "bldg_quality": "Good", "condition": "Good"}
+    tour = {k: 4 for k in ["wall_noise", "street_noise", "water", "windows", "moisture"]}
+    r = construction_score(building, None, tour, a, today=TODAY)
+    weights = {c["key"]: c["weight"] for c in r["components"]}
+    assert weights["photos"] == 10 and weights["tour"] == 30
+    texts = [f["text"] for f in r["flags"]]
+    assert "Photo 1: Check window frames for condensation" in texts
+    assert "From photos: Look at the balcony deck" in texts
+    assert r["photo_breakdown"] is not None
+
+
+def test_analyze_photos_sends_numbered_images(settings, tmp_path):
+    p1, p2 = tmp_path / "1.jpg", tmp_path / "2.png"
+    p1.write_bytes(JPEG)
+    p2.write_bytes(PNG)
+    fake = FakeAnthropic(_analysis_payload())
+    out = photos.analyze_photos([p1, p2], settings, client=fake)
+    content = fake.kwargs["messages"][0]["content"]
+    assert content[0] == {"type": "text", "text": "Photo 1:"}
+    assert content[1]["source"]["media_type"] == "image/jpeg"
+    assert content[3]["source"]["media_type"] == "image/png"
+    assert out["photo_count"] == 2
+
+
+def test_analyze_requires_photos_and_key(settings):
+    with pytest.raises(photos.PhotoError):
+        photos.analyze_photos([], settings, client=FakeAnthropic({}))
+    with pytest.raises(photos.PhotoError):
+        photos.analyze_photos([__import__("pathlib").Path(__file__)], settings)
+
+
+def test_api_photos_flow(settings, db):
+    client = TestClient(create_app(settings, db, anthropic_client=FakeAnthropic(_analysis_payload())))
+    lid = client.post("/api/listings", json={"fields": {"address": "1 Main St", "rent": 2900}}).json()["id"]
+    assert client.post(f"/api/listings/{lid}/photos/analyze").status_code == 400  # no photos yet
+
+    r = client.post(f"/api/listings/{lid}/photos", json={"images": [_b(JPEG), _b(JPEG), _b(b"bad")]})
+    body = r.json()
+    assert body["photos"]["files"] == ["1.jpg", "2.jpg"] and len(body["warnings"]) == 1
+    assert client.get(f"/api/listings/{lid}/photos/1.jpg").content == JPEG
+    assert client.get(f"/api/listings/{lid}/photos/..%2F..%2Ft.db").status_code == 404
+
+    r = client.post(f"/api/listings/{lid}/photos/analyze").json()
+    assert r["photos"]["analyzed_files"] == ["1.jpg", "2.jpg"]
+    assert any(c["key"] == "photos" for c in r["construction"]["components"])
+
+    r = client.delete(f"/api/listings/{lid}/photos/2.jpg").json()
+    assert r["photos"]["files"] == ["1.jpg"]
+    assert r["photos"]["analysis"] is not None  # kept; UI marks it as out of date
+
+    assert client.delete(f"/api/listings/{lid}").status_code == 204
+    assert not photos.photo_dir(settings, lid).exists()
+
+
+def test_migration_adds_photos_column(tmp_path):
+    path = tmp_path / "old.db"
+    con = _sqlite3.connect(path)
+    con.execute("CREATE TABLE listings (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, "
+                "updated_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'interested', url TEXT, source_text TEXT, "
+                "title TEXT, address TEXT, city TEXT, unit TEXT, rent REAL, bedrooms REAL, bathrooms REAL, sqft REAL, "
+                "year_built INTEGER, in_unit_laundry INTEGER, gym INTEGER, covered_parking INTEGER, parking_cost REAL, "
+                "parking_type TEXT, pet_policy TEXT, utilities_estimate REAL, monthly_fees REAL, deposit REAL, "
+                "move_in_fees REAL, available_date TEXT, notes TEXT, extracted_json TEXT, commute_json TEXT, "
+                "building_json TEXT, checklist_json TEXT)")
+    con.execute("INSERT INTO listings (created_at, updated_at, title) VALUES ('x', 'x', 'Old one')")
+    con.commit()
+    con.close()
+    d = Database(path)
+    assert d.list_listings()[0]["photos"] is None

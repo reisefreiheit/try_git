@@ -10,11 +10,11 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import assessor
+from . import assessor, photos
 from .commute import CommuteError, compute_commute
 from .config import Settings, get_settings
 from .construction import CHECKLIST, clean_checklist, construction_score
@@ -45,6 +45,10 @@ class BuildingIn(BaseModel):
     notes: str | None = None
 
 
+class PhotosIn(BaseModel):
+    images: list[str] = Field(default_factory=list, max_length=photos.MAX_PHOTOS)
+
+
 class ChecklistIn(BaseModel):
     ratings: dict[str, int | None] = Field(default_factory=dict)
     notes: str | None = None
@@ -63,7 +67,8 @@ def create_app(settings: Settings | None = None, db: Database | None = None,
             "must_haves": must_have_checks(listing, settings.must_haves),
             "costs": costs(listing, listing.get("commute") if not (listing.get("commute") or {}).get("error") else None),
             "construction": construction_score(
-                listing.get("building"), listing.get("year_built"), checklist.get("ratings")
+                listing.get("building"), listing.get("year_built"), checklist.get("ratings"),
+                (listing.get("photos") or {}).get("analysis"),
             ),
         }
 
@@ -147,6 +152,7 @@ def create_app(settings: Settings | None = None, db: Database | None = None,
     def delete_listing(listing_id: int) -> None:
         if not db.delete_listing(listing_id):
             raise HTTPException(404, "Listing not found")
+        photos.delete_all(settings, listing_id)
 
     @app.post("/api/listings/{listing_id}/commute")
     def refresh_commute(listing_id: int) -> dict[str, Any]:
@@ -180,6 +186,47 @@ def create_app(settings: Settings | None = None, db: Database | None = None,
             raise HTTPException(422, str(e)) from e
         return enrich(db.set_listing_json(listing_id, "checklist_json",
                                           {"ratings": ratings, "notes": body.notes or ""}))
+
+    def photo_state(listing: dict[str, Any]) -> dict[str, Any]:
+        return listing.get("photos") or {"files": [], "analysis": None, "analyzed_files": []}
+
+    @app.post("/api/listings/{listing_id}/photos")
+    def add_photos(listing_id: int, body: PhotosIn) -> dict[str, Any]:
+        state = photo_state(get_or_404(listing_id))
+        files, errors = photos.save_photos(settings, listing_id, state["files"], body.images)
+        listing = db.set_listing_json(listing_id, "photos_json", {**state, "files": files})
+        return {**enrich(listing), "warnings": errors}
+
+    @app.delete("/api/listings/{listing_id}/photos/{name}")
+    def remove_photo(listing_id: int, name: str) -> dict[str, Any]:
+        state = photo_state(get_or_404(listing_id))
+        if name not in state["files"]:
+            raise HTTPException(404, "Photo not found")
+        photos.delete_photo(settings, listing_id, name)
+        files = [f for f in state["files"] if f != name]
+        return enrich(db.set_listing_json(listing_id, "photos_json", {**state, "files": files}))
+
+    @app.get("/api/listings/{listing_id}/photos/{name}")
+    def get_photo(listing_id: int, name: str) -> Response:
+        state = photo_state(get_or_404(listing_id))
+        if name not in state["files"]:
+            raise HTTPException(404, "Photo not found")
+        path = photos.photo_dir(settings, listing_id) / name
+        if not path.exists():
+            raise HTTPException(404, "Photo file missing")
+        return FileResponse(path)
+
+    @app.post("/api/listings/{listing_id}/photos/analyze")
+    def analyze(listing_id: int) -> dict[str, Any]:
+        state = photo_state(get_or_404(listing_id))
+        folder = photos.photo_dir(settings, listing_id)
+        paths = [folder / f for f in state["files"] if (folder / f).exists()]
+        try:
+            analysis = photos.analyze_photos(paths, settings, client=anthropic_client)
+        except photos.PhotoError as e:
+            raise HTTPException(400, str(e)) from e
+        new_state = {**state, "analysis": analysis, "analyzed_files": [p.name for p in paths]}
+        return enrich(db.set_listing_json(listing_id, "photos_json", new_state))
 
     @app.get("/")
     def index() -> FileResponse:

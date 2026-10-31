@@ -9,6 +9,8 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+from .photos import photo_component
+
 CHECKLIST = [
     ("wall_noise", "Sound between units", "Knock on shared walls; listen for neighbors' TV, voices and footsteps above."),
     ("street_noise", "Street and freeway noise", "With windows closed. Matters near I-405, SR-522 and SR-520."),
@@ -28,13 +30,15 @@ QUALITY_SCORES = {
 }
 CONDITION_SCORES = {"poor": 0, "fair": 30, "average": 55, "good": 80, "excellent": 100}
 
-WEIGHTS = {"quality": 30, "condition": 15, "structure": 10, "age": 15, "tour": 30}
+# Sums to 100 when every input is present. Photos stay low: they are marketing shots.
+WEIGHTS = {"quality": 27, "condition": 13, "structure": 9, "age": 11, "tour": 30, "photos": 10}
 LABELS = {
     "quality": "County building quality grade",
     "condition": "County condition rating",
     "structure": "Construction type",
     "age": "Age (from renovation year if any)",
     "tour": "Your tour checklist",
+    "photos": "Listing photos (Claude)",
 }
 
 
@@ -123,6 +127,7 @@ def clean_checklist(raw: dict[str, Any] | None) -> dict[str, int]:
 
 def construction_score(building: dict[str, Any] | None, listing_year_built: int | None = None,
                        checklist: dict[str, Any] | None = None,
+                       photo_analysis: dict[str, Any] | None = None,
                        today: date | None = None) -> dict[str, Any]:
     b = building or {}
     this_year = (today or date.today()).year
@@ -147,10 +152,17 @@ def construction_score(building: dict[str, Any] | None, listing_year_built: int 
         avg = sum(ratings.values()) / len(ratings)
         parts["tour"] = ((avg - 1) / 4 * 100, f"{len(ratings)} of {len(CHECKLIST)} items rated, average {avg:.1f}/5")
 
+    photo = photo_component(photo_analysis, ratings)
+    if photo:
+        parts["photos"] = (photo[0], photo[1])
+
     flags = _flags(year, eff_year, constr, b.get("stories"), quality, condition, ratings, this_year)
+    for item in (photo_analysis or {}).get("check_on_tour", []):
+        prefix = f"Photo {item['photo']}: " if item.get("photo") else "From photos: "
+        flags.append({"level": "warn", "text": prefix + item["text"]})
     if not parts:
         return {"score": None, "confidence": None, "components": [], "flags": flags,
-                "missing": ["county record or year built", "tour checklist"]}
+                "missing": ["county record or year built", "tour checklist"], "photo_breakdown": None}
 
     total_w = sum(WEIGHTS[k] for k in parts)
     score = sum(WEIGHTS[k] * v for k, (v, _) in parts.items()) / total_w
@@ -168,4 +180,5 @@ def construction_score(building: dict[str, Any] | None, listing_year_built: int 
         for k, (v, d) in parts.items()
     ]
     return {"score": round(score), "confidence": confidence, "components": components,
-            "flags": flags, "missing": missing}
+            "flags": flags, "missing": missing,
+            "photo_breakdown": photo[2] if photo else None}
