@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Eastside Apartment Finder</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <h1>Eastside Apartment Finder</h1>
+      <p class="sub" id="sub">Loading…</p>
+    </div>
+    <div class="keys" id="keys"></div>
+  </header>
+
+  <main>
+    <section class="card add">
+      <h2>Add a listing</h2>
+      <form id="add-form">
+        <label for="add-text">Paste the listing text (copy everything from the listing page)</label>
+        <textarea id="add-text" rows="6" placeholder="1 bed / 1 bath, 720 sq ft, $2,650/mo… 12345 NE 85th St, Kirkland… in-unit washer/dryer, fitness center, garage parking $175/mo…"></textarea>
+        <div class="row">
+          <input id="add-url" type="url" placeholder="Listing link (optional)">
+          <label class="check"><input id="add-extract" type="checkbox" checked> Fill in details with Claude</label>
+        </div>
+        <details>
+          <summary>Or enter details by hand</summary>
+          <div class="grid" id="manual-fields"></div>
+        </details>
+        <div class="row end">
+          <span class="msg" id="add-msg" role="status"></span>
+          <button type="submit" id="add-btn">Add listing</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="toolbar">
+      <label>Show
+        <select id="filter-status"><option value="active">Active (not rejected)</option><option value="all">All</option></select>
+      </label>
+      <label>Sort by
+        <select id="sort">
+          <option value="construction">Construction score</option>
+          <option value="commute">Commute time</option>
+          <option value="monthly">True monthly cost</option>
+          <option value="rent">Rent</option>
+          <option value="updated">Recently updated</option>
+        </select>
+      </label>
+      <label class="check"><input id="only-pass" type="checkbox"> Only listings meeting every must-have</label>
+    </section>
+
+    <section id="list" class="list" aria-live="polite"></section>
+  </main>
+
+  <dialog id="detail">
+    <div class="dlg-head">
+      <h2 id="d-title"></h2>
+      <button class="ghost" id="d-close" aria-label="Close">✕</button>
+    </div>
+    <nav class="tabs" id="d-tabs">
+      <button data-tab="details" class="on">Details</button>
+      <button data-tab="costs">Cost &amp; commute</button>
+      <button data-tab="construction">Construction</button>
+      <button data-tab="tour">Tour checklist</button>
+    </nav>
+    <div id="d-body"></div>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
